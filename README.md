@@ -9,9 +9,19 @@ preconfigured for the **AWS Asia Pacific (Thailand)** S3 zone, `ap-southeast-7`.
 
 `da-server` stores AltDA inputs through the MinIO S3 client. It exposes four S3
 settings — bucket, endpoint, access key, secret — and **no separate region
-flag**: the region is determined entirely by the endpoint hostname. To target
-Thailand you point the endpoint at `s3.ap-southeast-7.amazonaws.com`, which this
-image uses as its default.
+flag**: the region is derived from the endpoint hostname. To target Thailand you
+point the endpoint at `s3.ap-southeast-7.amazonaws.com`, which this image uses as
+its default.
+
+> **Thailand patch.** minio-go's built-in AWS endpoint map has no entry for
+> `ap-southeast-7` (verified through v7.2.0). Left unpatched, it signs requests
+> for `ap-southeast-7` but sends them to the `us-east-1` host, so every S3 `PUT`
+> fails with *"The ap-southeast-7 location constraint is incompatible for the
+> region specific endpoint this request was sent to."* The `Dockerfile`
+> registers the Thailand endpoint at build time (a same-package `init()` added
+> via a local `go mod replace`), so the published image is correct out of the
+> box. Drop that step once minio-go ships `ap-southeast-7` upstream. Your bucket
+> must still actually exist in `ap-southeast-7`.
 
 | Flag | Env var | Value for Thailand |
 |------|---------|--------------------|
