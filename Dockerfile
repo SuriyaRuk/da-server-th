@@ -1,10 +1,15 @@
 # syntax=docker/dockerfile:1.7
 
 # Self-contained multi-stage build for the Optimism AltDA `da-server`
-# (op-alt-da/cmd/daserver). Build context MUST be the repository root so the
-# monorepo go.mod / replace directives resolve.
+# (op-alt-da/cmd/daserver). The builder clones the Optimism monorepo at build
+# time, so this image builds from ANY context — including this standalone repo,
+# which carries only the Docker/CI scaffolding and none of the Go source:
 #
-#   docker build -f Dockerfile -t da-server .
+#   docker build -t da-server .
+#
+# Pin or swap the source with build args:
+#   docker build --build-arg OPTIMISM_REF=v1.2.3 -t da-server .
+#   docker build --build-arg OPTIMISM_REPO=https://github.com/you/fork -t da-server .
 #
 # The da-server already supports S3 storage via the MinIO client. Selecting the
 # Thailand zone is purely a matter of pointing --s3.endpoint at the AWS Asia
@@ -21,24 +26,29 @@ RUN apk add --no-cache gcc musl-dev linux-headers git make bash
 
 WORKDIR /app
 
-# Warm the module cache first for faster incremental builds.
-COPY go.mod go.sum ./
+# Source of the Optimism monorepo (holds go.mod + op-alt-da/cmd/daserver and the
+# replace directives the build needs). OPTIMISM_REF accepts a branch or tag.
+ARG OPTIMISM_REPO=https://github.com/shikyo13/optimism-BB
+ARG OPTIMISM_REF=develop
+
+# Shallow-clone the monorepo at the requested ref into the build dir.
+RUN git clone --depth 1 --branch "${OPTIMISM_REF}" "${OPTIMISM_REPO}" .
+
+# Warm the module cache before the build.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod download
 
-# Bring in the full monorepo (needed for local packages + replace directives).
-COPY . .
-
-# Version metadata (matches op-alt-da/justfile ldflags).
+# Version metadata (matches op-alt-da/justfile ldflags). VERSION can be
+# overridden; the commit/date are derived from the cloned checkout.
 ARG VERSION=v0.0.0
-ARG GIT_COMMIT=""
-ARG GIT_DATE=""
 
 ENV CGO_ENABLED=1 GOOS=linux
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    GIT_COMMIT="$(git rev-parse HEAD)"; \
+    GIT_DATE="$(git show -s --format=%ct HEAD)"; \
     go build -trimpath \
       -ldflags "-X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.GitDate=${GIT_DATE}" \
       -o /usr/local/bin/da-server \
