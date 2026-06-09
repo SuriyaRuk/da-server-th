@@ -55,9 +55,21 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build <<'PATCH'
 set -eu
+# Resolve the minio-go module directory in the cache. `go mod download` for the
+# specific module guarantees it is extracted, because `go list -m -f '{{.Dir}}'`
+# reports an EMPTY Dir for a module that has not been extracted yet. The guard
+# below is critical: `set -e` does not abort on an empty command substitution in
+# an assignment, so an empty MINIO_SRC would silently turn the cp below into
+# `cp -a /. ...` — recursively copying the whole root filesystem (/proc, /sys),
+# which is exactly the failure this replaces.
+go mod download github.com/minio/minio-go/v7
 MINIO_SRC="$(go list -m -f '{{.Dir}}' github.com/minio/minio-go/v7)"
+if [ -z "${MINIO_SRC}" ] || [ ! -d "${MINIO_SRC}" ]; then
+	echo "ERROR: could not resolve minio-go module directory (got: '${MINIO_SRC}')" >&2
+	exit 1
+fi
 mkdir -p /patched/minio-go
-cp -a "$MINIO_SRC"/. /patched/minio-go/
+cp -a "${MINIO_SRC}/." /patched/minio-go/
 chmod -R u+w /patched/minio-go
 cat > /patched/minio-go/s3-endpoints-thailand.go <<'EOF'
 // Build-time patch (da-server image): register the AWS Asia Pacific (Thailand)
