@@ -1,0 +1,21 @@
+services:
+  da-server:
+    # Use the published image...
+    image: ghcr.io/shikyo13/da-server:latest
+    # ...or build locally from the repo root:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    container_name: da-server
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    env_file:
+      - .env
+    # env_file already supplies the OP_ALTDA_SERVER_* values. The Thailand S3
+    # endpoint is baked in as a default but shown here for clarity.
+    environment:
+      OP_ALTDA_SERVER_S3_ENDPOINT: s3.ap-southeast-7.amazonaws.com
+    command:
+      - --addr=0.0.0.0
+      - --port=3100

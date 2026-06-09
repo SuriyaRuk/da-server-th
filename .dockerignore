@@ -1,0 +1,7 @@
+# Keep the build context lean. The Go build still needs the full source tree,
+# so only strip VCS metadata and large non-Go artifacts.
+.git
+.github
+**/node_modules
+**/.DS_Store
+*.md
