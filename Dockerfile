@@ -11,9 +11,10 @@
 #   docker build --build-arg OPTIMISM_REF=v1.2.3 -t da-server .
 #   docker build --build-arg OPTIMISM_REPO=https://github.com/you/fork -t da-server .
 #
-# The da-server already supports S3 storage via the MinIO client. Selecting the
-# Thailand zone is purely a matter of pointing --s3.endpoint at the AWS Asia
-# Pacific (Thailand) regional endpoint: s3.ap-southeast-7.amazonaws.com
+# The da-server stores commitments in S3 via the MinIO client. The Thailand zone
+# is selected by --s3.endpoint=s3.ap-southeast-7.amazonaws.com, but minio-go's
+# endpoint map doesn't know that region yet, so the builder also applies a small
+# patch (see the "register the ap-southeast-7 endpoint" step below).
 
 ARG GO_VERSION=1.24.13
 ARG ALPINE_VERSION=3.22
@@ -38,6 +39,42 @@ RUN git clone --depth 1 --branch "${OPTIMISM_REF}" "${OPTIMISM_REPO}" .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod download
+
+# ---- patch: register the ap-southeast-7 (Thailand) S3 endpoint ---------------
+# daserver talks to S3 through minio-go, whose hardcoded AWS endpoint map has NO
+# entry for ap-southeast-7 in any released version (verified through v7.2.0).
+# Because of that, minio derives the signing region "ap-southeast-7" from the
+# endpoint but then rewrites the request host to the us-east-1 endpoint, so AWS
+# rejects every PUT with:
+#   "The ap-southeast-7 location constraint is incompatible for the region
+#    specific endpoint this request was sent to."
+# We copy minio-go out of the module cache, drop in a same-package init() that
+# adds the Thailand endpoint, and point the build at it with a local replace.
+# (An init() file is used instead of sed so the patch is portable and survives
+# minio-go bumps; remove it once minio-go ships ap-southeast-7 upstream.)
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build <<'PATCH'
+set -eu
+MINIO_SRC="$(go list -m -f '{{.Dir}}' github.com/minio/minio-go/v7)"
+mkdir -p /patched/minio-go
+cp -a "$MINIO_SRC"/. /patched/minio-go/
+chmod -R u+w /patched/minio-go
+cat > /patched/minio-go/s3-endpoints-thailand.go <<'EOF'
+// Build-time patch (da-server image): register the AWS Asia Pacific (Thailand)
+// region, absent from minio-go's endpoint map as of v7.2.0. Without it minio
+// signs for ap-southeast-7 but sends to the us-east-1 host. Drop this file once
+// minio-go registers ap-southeast-7 upstream.
+package minio
+
+func init() {
+	awsS3EndpointMap["ap-southeast-7"] = awsS3Endpoint{
+		"s3.ap-southeast-7.amazonaws.com",
+		"s3.dualstack.ap-southeast-7.amazonaws.com",
+	}
+}
+EOF
+go mod edit -replace github.com/minio/minio-go/v7=/patched/minio-go
+PATCH
 
 # Version metadata (matches op-alt-da/justfile ldflags). VERSION can be
 # overridden; the commit/date are derived from the cloned checkout.
