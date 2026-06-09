@@ -38,21 +38,27 @@ them empty and set `--file.path` to use local file storage instead.
 | `docker-compose.yml` | One-command local run, wired to the Thailand endpoint. |
 | `.env.example` | Template for credentials / bucket. |
 
-## Install into the repo
+## How the build works
 
-These files build from the **repository root** (the monorepo `go.mod` and its
-`replace` directives are required). From your clone of `shikyo13/optimism-BB`:
+The `Dockerfile` is **self-contained**: its builder stage clones the Optimism
+monorepo at build time, so it builds from any context — no Go source needs to
+live alongside it. The source repo/ref are build args:
+
+| Build arg | Default | Purpose |
+|-----------|---------|---------|
+| `OPTIMISM_REPO` | `https://github.com/shikyo13/optimism-BB` | Monorepo to clone |
+| `OPTIMISM_REF` | `develop` | Branch or tag to build |
+| `VERSION` | `v0.0.0` | Stamped into `main.Version` |
+
+Pin a release or swap forks at build time:
 
 ```bash
-cp Dockerfile .dockerignore docker-compose.yml .env.example .       # repo root
-mkdir -p .github/workflows
-cp docker-publish.yml .github/workflows/
+docker build --build-arg OPTIMISM_REF=v1.2.3 -t da-server .
 ```
 
 ## Build & run locally
 
 ```bash
-# from the repo root
 docker build -t da-server .
 
 cp .env.example .env        # then edit credentials/bucket
